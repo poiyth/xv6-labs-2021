@@ -30,15 +30,19 @@ ls(char *path)
   struct dirent de;
   struct stat st;
 
+  //打开该目录的文件
   if((fd = open(path, 0)) < 0){
     fprintf(2, "ls: cannot open %s\n", path);
     return;
   }
 
+  //获取文件的信息
   if(fstat(fd, &st) < 0){
     fprintf(2, "ls: cannot stat %s\n", path);
     close(fd);
     return;
+
+
   }
 
   switch(st.type){
