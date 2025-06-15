@@ -28,6 +28,8 @@ main()
     iinit();         // inode table
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
+    
+    //以上这些都是设备和子系统设置，以下userinit创建第一个进程。
     userinit();      // first user process
     __sync_synchronize();
     started = 1;

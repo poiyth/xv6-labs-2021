@@ -23,6 +23,7 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int trace(int);//传入一个参数，为mask
 
 // ulib.c
 int stat(const char*, struct stat*);

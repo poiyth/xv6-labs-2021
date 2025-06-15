@@ -95,3 +95,15 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64 sys_trace(void)
+{
+    int mask;
+    if(argint(0, &mask) < 0)   //获取mask字段
+    //这里系统调用传递的参数位于寄存器中，这里直接从寄存器0中取出mask字段
+    return -1;
+
+    struct proc *p = myproc();//获取当前进程的pid
+    p->mask = mask;         //给当前进程的mask覆上
+    return 0;
+}
