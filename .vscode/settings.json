@@ -4,6 +4,8 @@
         "stat.h": "c",
         "types.h": "c",
         "param.h": "c",
-        "memlayout.h": "c"
-    }
+        "memlayout.h": "c",
+        "sysinfo.h": "c"
+    },
+    "C_Cpp.errorSquiggles": "enabled"
 }

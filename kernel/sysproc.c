@@ -6,6 +6,8 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
+
 
 uint64
 sys_exit(void)
@@ -98,12 +100,36 @@ sys_uptime(void)
 
 uint64 sys_trace(void)
 {
-    int mask;
-    if(argint(0, &mask) < 0)   //获取mask字段
+  int mask;
+  if(argint(0, &mask) < 0)   //获取mask字段
+  {
+    printf("sys_trace系统调用执行失败,失败原因:无法从寄存器中读取mask字段\n");
+     //这里系统调用传递的参数位于寄存器中，这里直接从寄存器0中取出mask字段
+    return -1;
+  }
+
+  struct proc *p = myproc();//获取当前进程的pid
+  p->mask = mask;         //给当前进程的mask覆上
+  return 0;
+}
+
+uint64 sys_sysinfo(void)
+{
+  struct sysinfo info;
+  info.freemem = kcollect();
+  info.nproc = countproc();
+
+  //将内核空间的info送回到用户空间
+  uint64 userinfo;
+  if(argaddr(0, &userinfo) < 0)   //获取用户空间地址
+  {
+    printf("sys_sysinfo系统调用执行失败,失败原因:无法从寄存器中读取sysinfo结构体指针\n");
     //这里系统调用传递的参数位于寄存器中，这里直接从寄存器0中取出mask字段
     return -1;
-
-    struct proc *p = myproc();//获取当前进程的pid
-    p->mask = mask;         //给当前进程的mask覆上
-    return 0;
+  }
+  if(copyout(myproc()->pagetable, userinfo, (char *)&info, sizeof(info)) < 0)
+  {
+    return -1;
+  }
+  return 0;
 }

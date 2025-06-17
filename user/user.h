@@ -25,6 +25,9 @@ int sleep(int);
 int uptime(void);
 int trace(int);//传入一个参数，为mask
 
+struct sysinfo;//需要预声明sysnifo的存在
+int sysinfo(struct sysinfo *);//传入一个保存系统信息的指针，
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

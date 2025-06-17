@@ -169,6 +169,21 @@ freeproc(struct proc *p)
   p->mask = 0;//这里把mask修改为0
 }
 
+//查找state不为UNUSED的数量个数
+uint64 countproc()
+{
+  struct proc *p;
+  uint64 unused_proc_num = 0;
+
+  for(p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if(p->state != UNUSED) unused_proc_num++;
+    release(&p->lock);
+  }
+  return unused_proc_num;
+}
+
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
 pagetable_t
@@ -658,3 +673,5 @@ procdump(void)
     printf("\n");
   }
 }
+
+

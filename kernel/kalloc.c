@@ -11,6 +11,8 @@
 
 void freerange(void *pa_start, void *pa_end);
 
+uint64 kcollect();
+
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
@@ -79,4 +81,22 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+uint64 kcollect()
+{
+  struct run *r;
+  uint64 pgnum = 0; //统计空闲页表个数
+
+  //为接下来的统计空闲页表个数提前加锁，防止同时发生删除或者增加导致统计错误
+  acquire(&kmem.lock);
+  r = kmem.freelist; //从头开始往下便利
+  while(r) 
+  {
+    pgnum++;
+    r = r->next;
+  }
+  release(&kmem.lock);   //释放锁
+
+  return pgnum * PGSIZE;
 }
