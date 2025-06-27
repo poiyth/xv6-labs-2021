@@ -6,6 +6,7 @@
         "riscv.h": "c",
         "memlayout.h": "c",
         "spinlock.h": "c",
-        "defs.h": "c"
+        "defs.h": "c",
+        "elf.h": "c"
     }
 }
