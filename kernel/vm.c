@@ -441,7 +441,7 @@ void vmprint(pagetable_t pagetable, uint64 level)
   for(int i = 0; i < 512; i++)
   {
     pte_t pte = pagetable[i];
-    if((pte & PTE_V) == 0) continue; //无效pte直接跳过
+    if((pte & PTE_V) == 0) continue; //无效pte直接跳过 
     for(int j = level; j < 3; j++)
     {
       printf(" ..");

@@ -81,6 +81,35 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 va_addr, mask_addr;
+  int pg_size;
+
+  //读取三个参数
+  argaddr(0, &va_addr);
+  argint(1, &pg_size);
+  argaddr(2, &mask_addr);
+
+  //mask只有32位，这里需要判断是否超出限制
+  if(pg_size > 32) return -1;
+
+  uint64 addr = va_addr;
+  uint mask = 0;
+  pagetable_t pagetable = myproc()->pagetable;
+
+  //接下来访问虚拟地址页面有无被访问过
+  for(int i = 0; i < pg_size; i++)
+  {
+    pte_t *pte = walk(pagetable, addr, 0);
+    if(pte && ((*pte) & PTE_V) && ((*pte) & PTE_A))
+    {
+      mask |= 1LL<<i;
+      (*pte) &= (~PTE_A);           //清除该pte上的1.
+    }
+    addr += PGSIZE;
+  }
+
+  copyout(pagetable, mask_addr, (char *)&mask, sizeof(mask));
+
   return 0;
 }
 #endif
@@ -107,3 +136,4 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+

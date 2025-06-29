@@ -7,6 +7,8 @@
         "memlayout.h": "c",
         "spinlock.h": "c",
         "defs.h": "c",
-        "elf.h": "c"
+        "elf.h": "c",
+        "date.h": "c",
+        "syscall.h": "c"
     }
 }
