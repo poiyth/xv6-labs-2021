@@ -29,6 +29,44 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+
+//懒分配相关函数
+//分配页面
+int lazy_alloc(uint64 va)
+{
+  // printf("页错误导致惰性分配！");
+    uint64 page_addr = PGROUNDDOWN(va); //得到要分配页的虚拟地址的对齐后的结果
+    char *mem = kalloc();
+    struct proc* p = myproc();
+    if(mem == 0){
+      return -1;
+    }
+    memset(mem, 0, sizeof(PGSIZE));
+    if(mappages(p->pagetable, page_addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+      kfree(mem);
+      return -1;
+    }
+    return 0;
+}
+
+//判断页面是否是合法的懒分配页面
+int is_lazy_addr(uint64 va)
+{
+  struct proc* p = myproc();
+  if(va > MAXVA) return 0;   //超出va上限
+
+  //判断是否属于堆区内存
+  if(va < PGROUNDDOWN(p->trapframe->sp)+PGSIZE || va >= p->sz) 
+    return 0;
+
+  //判断是否未分配pte
+  pte_t * pte = walk(p->pagetable, va, 0);
+  if(pte && (*pte & PTE_V)) 
+    return 0;
+
+  return 1;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -67,7 +105,14 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if ((r_scause() == 13 || r_scause() == 15) && is_lazy_addr(r_stval())) //这里加上是懒分配的页面
+  {
+    if(lazy_alloc(r_stval()) < 0)
+    {
+      p->killed = 1;
+    }
+  } 
+   else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
