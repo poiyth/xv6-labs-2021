@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "kernel_pagerefcnt.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -33,6 +34,48 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
+//判断该虚拟地址是否是出自cow未分配的页面
+int is_cow_page(uint64 va)
+{
+  //大于va上界，一定不是
+  if(va >= MAXVA) return 0;
+
+  struct proc* p =myproc();
+  //得到pte，有效且PTE_C标志位为1才可
+  pte_t *pte = walk(p->pagetable, va, 0);
+  if(pte == 0) return 0;
+  if((*pte & PTE_V) ==0) return 0;
+  if((*pte & PTE_U) ==0) return 0;
+  if((*pte & PTE_C) ==0) return 0;
+  return 1;
+}
+
+int cow_allocation(uint64 va)
+{
+  struct proc *p = myproc();
+  pte_t *pte = walk(p->pagetable, va, 0);
+
+  uint64 flag = PTE_FLAGS(*pte);  //提前把标志位处理好防止之后取消映射后造成问题
+  flag |= PTE_W;  //这里修改标志位可写
+  flag &= (~PTE_C);     //除去PTE_C位   
+  
+  uint64 pre_pa = PTE2PA(*pte);   //pre_pa表示va之前映射的物理页
+  
+
+  uint64 *mem = kalloc();          //mem表示新得到的物理页
+  if(mem == 0) return -1;
+  va = PGROUNDDOWN(va);       //得到该页对齐后的地址。
+
+  memmove(mem, (char*)pre_pa, PGSIZE);  //将内容进行复制
+  uvmunmap(p->pagetable, va, 1, 1);   //取消原本va的映射 
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, flag) < 0)
+  {
+    kfree(mem);
+    return -1;
+  }
+  return 0;
+}
+
 void
 usertrap(void)
 {
@@ -67,6 +110,11 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 15 && is_cow_page(r_stval())) {
+    if(cow_allocation(r_stval()) < 0)
+    {
+      p->killed = 1;
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
