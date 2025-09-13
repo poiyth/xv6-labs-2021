@@ -30,17 +30,17 @@ barrier()
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
-  pthread_mutex_lock(&bstate.barrier_mutex);
-  bstate.nthread++;
-  if(bstate.nthread == nthread){
-    bstate.nthread = 0;
-    bstate.round ++;
-    pthread_cond_broadcast(&bstate.barrier_cond);
+  pthread_mutex_lock(&bstate.barrier_mutex);     //要修改到达该屏障的线程数，先获取锁
+  bstate.nthread++;                              //修改到达该屏障的数目
+  if(bstate.nthread == nthread){                 //若全部到达
+    bstate.nthread = 0;                          //到达的线程数清零
+    bstate.round ++;                             //轮次++
+    pthread_cond_broadcast(&bstate.barrier_cond);//唤醒所有的线程
   }
-  else {
-    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  else {                                                                 
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);//否则，去睡眠等待唤醒并且释放锁
   }
-  pthread_mutex_unlock(&bstate.barrier_mutex);
+  pthread_mutex_unlock(&bstate.barrier_mutex);                //这里需要统一释放锁（全部到达时直接释放，被唤醒的线程又重新获取锁了也需要释放）
 }
 
 static void *
