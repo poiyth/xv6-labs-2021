@@ -18,6 +18,8 @@ int keys[NKEYS];
 int nthread = 1;
 
 
+pthread_mutex_t lock[NKEYS];     // declare a lock,给每个桶都声明一个锁
+
 double
 now()
 {
@@ -52,7 +54,9 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
+    pthread_mutex_lock(&lock[i]);       // acquire lock
     insert(key, value, &table[i], table[i]);
+    pthread_mutex_unlock(&lock[i]);     // release lock
   }
 
 }
@@ -117,6 +121,9 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+
+  for(int i = 0; i < NKEYS; i++)
+    pthread_mutex_init(&lock[i], NULL); // initialize the lock
 
   //
   // first the puts
