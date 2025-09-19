@@ -11,4 +11,6 @@
 #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
 #define FSSIZE       1000  // size of file system in blocks
 #define MAXPATH      128   // maximum file path name
-#define STEAL_CNT    5
+#define STEAL_CNT    5     // 一个cpu核最多偷取的页帧 
+#define BCACHE_CNT   13   //bcache分成桶的数量
+#define BUFMAP_HASH(dev, blockno) ((((dev)<<27)|(blockno))%BCACHE_CNT)
