@@ -374,34 +374,92 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
+// static uint
+// bmap(struct inode *ip, uint bn)                      //bn范围在0-267上，一共268个
+// {
+//   uint addr, *a;
+//   struct buf *bp;
+
+//   if(bn < NDIRECT){                                  //首先判断bn是否在直接数据块内
+//     if((addr = ip->addrs[bn]) == 0)                  //若未分配则直接分配一个数据块
+//       ip->addrs[bn] = addr = balloc(ip->dev);
+//     return addr;
+//   }
+//   bn -= NDIRECT;                                     //在间接索引块内，减去12个直接索引块
+
+//   if(bn < NINDIRECT){                                //判断是否在简介索引范围内
+//     // Load indirect block, allocating if necessary. 
+//     if((addr = ip->addrs[NDIRECT]) == 0)            //判断间接索引块是否分配，非数据块
+//       ip->addrs[NDIRECT] = addr = balloc(ip->dev);   //分配简介索引块
+//     bp = bread(ip->dev, addr);                       //现在要读取该块中内容，先把该索引块加载到块缓存中
+//     a = (uint*)bp->data;                             //获取数据部分内容
+//     if((addr = a[bn]) == 0){                         //判断第bn个数据块是否存在
+//       a[bn] = addr = balloc(ip->dev);                //不存在直接分配
+//       log_write(bp);                                 //因为索引块修改了，所以要日志记录
+//     }
+//     brelse(bp);                                      //这里释放索引块的缓存
+//     return addr;
+//   }
+
+//   panic("bmap: out of range");                       //不在范围内，报错
+// }
+
+//三级索引，bn->[0,10]直接数据块，b11->[11-266]一级索引，b12->[267,65802]二级索引
 static uint
-bmap(struct inode *ip, uint bn)
+bmap(struct inode *ip, uint bn)                      
 {
   uint addr, *a;
   struct buf *bp;
 
-  if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
+  if(bn < NDIRECT){                                  //首先判断bn是否在直接数据块内
+    if((addr = ip->addrs[bn]) == 0)                  //若未分配则直接分配一个数据块
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
-  bn -= NDIRECT;
+  bn -= NDIRECT;                                     //在间接索引块内，减去11个直接索引块
 
-  if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
-      ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
-      log_write(bp);
+  if(bn < NINDIRECT){                                //判断是否在一级索引范围内
+    // Load indirect block, allocating if necessary. 
+    if((addr = ip->addrs[NDIRECT]) == 0)             //判断间接索引块是否分配，非数据块
+      ip->addrs[NDIRECT] = addr = balloc(ip->dev);   //分配间接索引块
+    bp = bread(ip->dev, addr);                       //现在要读取该块中内容，先把该索引块加载到块缓存中
+    a = (uint*)bp->data;                             //获取数据部分内容
+    if((addr = a[bn]) == 0){                         //判断第bn个数据块是否存在
+      a[bn] = addr = balloc(ip->dev);                //不存在直接分配
+      log_write(bp);                                 //因为索引块修改了，所以要日志记录
     }
-    brelse(bp);
+    brelse(bp);                                      //这里释放索引块的缓存
     return addr;
   }
 
-  panic("bmap: out of range");
+  bn -= NINDIRECT;                                   //再减去256个一级索引块
+  if(bn < N2INDIRECT)                                //判断是否在2级索引块的范围内
+  {
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)         //首先判断第一层索引块是否存在
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);   //不在则分配，
+    bp = bread(ip->dev, addr);                      
+    a = (uint*)bp->data;                
+    uint bnum = bn / NINDIRECT;                      //这里查找在第一层索引块中的哪一个
+    if((addr = a[bnum]) == 0)                 
+    {
+      a[bnum] = addr = balloc(ip->dev);              //这里分配
+      log_write(bp); 
+    }
+    brelse(bp);                                      //释放第一层索引块
+
+    bn %= NINDIRECT;                                 //这里找在第二层索引块的位置
+    bp = bread(ip->dev, addr);                       //这里获取第二层索引块的缓存
+    a = (uint*)bp->data;
+    if((addr = a[bn]) == 0)                          //这里查找数据块是否存在
+    {
+      a[bn] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);                                     //释放第二层索引块
+    return addr;
+  }
+
+  panic("bmap: out of range");                       //不在范围内，报错
 }
 
 // Truncate inode (discard contents).
@@ -413,6 +471,7 @@ itrunc(struct inode *ip)
   struct buf *bp;
   uint *a;
 
+  //释放所有直接数据块
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
@@ -420,6 +479,7 @@ itrunc(struct inode *ip)
     }
   }
 
+  //释放所有1级索引块
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -430,6 +490,31 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  //释放所有2级索引块
+  if(ip->addrs[NDIRECT + 1])
+  {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++)                  //在第一层索引块中遍历
+    {
+      if(a[j])                                      //存在第二层索引块
+      {
+        struct buf *b2p = bread(ip->dev, a[j]);     //获取第二层索引块的缓存
+        uint *a2 = (uint*)b2p->data;
+        uint k;
+        for(k = 0; k < NINDIRECT; k++)              //在第二层索引块中查找数据块
+        {
+          if(a2[k])                                 //存在直接释放数据块
+            bfree(ip->dev, a2[k]);
+        }
+        brelse(b2p);                                //这里释放第二层索引块的缓存并释放改第二层索引块
+        bfree(ip->dev, a[j]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);         //释放第一次索引块
   }
 
   ip->size = 0;
