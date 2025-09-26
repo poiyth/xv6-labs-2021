@@ -316,6 +316,44 @@ sys_open(void)
     }
   }
 
+
+  //如果文件类型是符号链接并且没有设置O_NOFOLLOW,说明是软链接
+  if(ip->type == T_SYMLINK && !(omode&O_NOFOLLOW) )
+  {
+    uint depth = 0;   //设置查找深度阈值
+    char target[MAXPATH]; //记录当前目标文件的路径
+
+    //循环查找目标路径
+    while(ip->type == T_SYMLINK && depth < 10)
+    {
+      depth++;
+      if(readi(ip, 0, (uint64)target, 0, ip->size) != ip->size)
+      {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      target[ip->size] = '\0';//添加终止符
+
+      iunlockput(ip);//释放当前软链接的inode
+
+      if((ip = namei(target)) == 0)
+      {
+        end_op();
+        return -1;
+      }
+
+      ilock(ip);  //找到新锁定的ilock
+    }
+    //如果深度太大可能是循环链接
+    if(depth >= 10)
+    {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op();
@@ -482,5 +520,39 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64 sys_symlink(void)
+{   
+  
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+  
+  //先获取target和path
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  // 开始一个文件系统操作事务，确保原子性（例如涉及日志时）
+    begin_op();
+
+  ip = create(path, T_SYMLINK, 0, 0);
+  if(ip == 0)
+  {
+    end_op();
+    return -1;
+  }
+
+  uint64 tarlen = strlen(target);
+  if(writei(ip, 0, (uint64)target, 0, tarlen) != tarlen)
+  {
+    iunlockput(ip);   //释放ip
+    end_op();         //
+    return -1;
+  }
+
+  iunlockput(ip);   //释放ip
+  end_op();         //关闭事务
+
   return 0;
 }
