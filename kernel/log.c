@@ -122,21 +122,21 @@ recover_from_log(void)
   write_head(); // clear the log
 }
 
-// called at the start of each FS system call.
+// called at the start of each FS system call. //在关于文件的系统调用前都需要调用
 void
-begin_op(void)
+begin_op(void)                         //事务开始的函数，确保有足够的资源才可以开始
 {
-  acquire(&log.lock);
+  acquire(&log.lock);                  //先获取锁
   while(1){
-    if(log.committing){
-      sleep(&log, &log.lock);
-    } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+    if(log.committing){                        //有事务正在提交
+      sleep(&log, &log.lock);                   //睡眠等待
+    } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGSIZE){  //日志空间容量不够
       // this op might exhaust log space; wait for commit.
-      sleep(&log, &log.lock);
+      sleep(&log, &log.lock);                                         //睡眠等待
     } else {
-      log.outstanding += 1;
-      release(&log.lock);
-      break;
+      log.outstanding += 1;                                          //正在进行的事务个数++   
+      release(&log.lock);                                            //释放锁
+      break;                                                         //循环等待
     }
   }
 }
@@ -148,11 +148,11 @@ end_op(void)
 {
   int do_commit = 0;
 
-  acquire(&log.lock);
-  log.outstanding -= 1;
-  if(log.committing)
-    panic("log.committing");
-  if(log.outstanding == 0){
+  acquire(&log.lock);                  //获取日志锁
+  log.outstanding -= 1;                //正在进行事务-=1
+  if(log.committing)                   //不应该事务正在提交
+    panic("log.committing"); 
+  if(log.outstanding == 0){            //这是最后一个事务，可以提交
     do_commit = 1;
     log.committing = 1;
   } else {
@@ -163,7 +163,7 @@ end_op(void)
   }
   release(&log.lock);
 
-  if(do_commit){
+  if(do_commit){          //提交
     // call commit w/o holding locks, since not allowed
     // to sleep with locks.
     commit();
