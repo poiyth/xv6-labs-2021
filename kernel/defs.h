@@ -145,6 +145,7 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
+int             get_mmap_index(struct proc*, uint64);
 
 // uart.c
 void            uartinit(void);
@@ -170,6 +171,10 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+uint64          mmap_writeback(uint64, uint64,int);   
+int             munmap(uint64, uint64);
+
+
 
 // plic.c
 void            plicinit(void);

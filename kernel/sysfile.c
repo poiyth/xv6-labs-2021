@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -483,4 +484,109 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+//去进程的虚拟地址空间中找到一个区域，进行映射,返回首地址且首地址需要和页对齐
+uint64 get_mmap_space(uint64 length, struct mmap_vma *vma, int *index)
+{
+  //最普遍的思路是寻找已有的vma的最小地址，再往后找即可，但这样上方的vma地址被取消映射就浪费掉了
+  //所以这里先将所有的vma的起始地址按照从大到小排序，先看间隙中能否插入
+
+  //1.先将vma数组排序,就16个,采用冒泡排序
+  int i,j;
+  for(i = 0; i < VMA_SZ - 1; i++)
+  {
+    int swap = 0;
+    for(j = 0; j < VMA_SZ - 1; j++)
+    {
+      if(!vma[j + 1].used)  continue;    //如果后面那个没使用，直接跳过
+      if(!vma[j].used || vma[j].addr < vma[j+1].addr)   //小的往后放.
+      {
+        struct mmap_vma tmp = vma[j];
+        vma[j] = vma[j+1];
+        vma[j+1] = tmp;
+        swap = 1;
+      }
+    }
+    if(!swap) break;                                  //当没有发生交换时直接退出
+  }
+
+  if(vma[VMA_SZ - 1].used) return -1;   //由于从大到小排序，如果最后一个都被使用了直接返回-1
+  *index = VMA_SZ - 1;                  //取最后一个的编号
+
+  //2.枚举间隙,考虑当前vma区域和上个之间的间隙是否能够插入length
+  uint64 last_addr = TRAPFRAME;
+  for(i = 0; i < VMA_SZ; i++)
+  {
+    if(vma[i].used)
+    {
+      //这里的PGROUNDUP(vma[i].addr + vma[i].length)是往上找第一个页首地址 + 当前需要长度
+      //即顶部的地址（未达到）<= 上一个的起始地址说明间隙可以
+      if(PGROUNDUP(vma[i].addr + vma[i].length) + length <= last_addr)
+        return PGROUNDUP(vma[i].addr + vma[i].length);
+    }
+    else    //之后都是未使用的，直接break;
+      break;
+    last_addr = vma[i].addr;
+  }
+
+  //3.间隙不够，只能往下找一个
+  last_addr = PGROUNDDOWN(last_addr); //由于不同的vma不可共用同一个页，所以这里先取到这个页的首地址
+  return PGROUNDDOWN(last_addr - length);//这里直接返回页首地址即可。
+
+}
+
+
+uint64 sys_mmap(void )
+{
+  //系统调用第一步，首先接受所有的参数
+  uint64 addr;     //起始首地址
+  uint64 length;   //长度
+  int prot;        //权限
+  int flags;       //私有映射还是共享映射
+  struct file *fd; //映射的文件
+  int pfd;         //进程提供的文件描述符
+  int offset;      //映射文件的偏移
+  uint64 failed = 0xffffffffffffffff;
+  if(argaddr(0, &addr) < 0)   return failed;
+  if(argaddr(1, &length) < 0) return failed;
+  if(argint(2, &prot) < 0)    return failed;
+  if(argint(3, &flags) < 0)   return failed;
+  if(argfd(4, &pfd, &fd) < 0) return failed;
+  if(argint(5, &offset) < 0)  return failed;
+  if(addr || offset)          return failed; //条件检查，只要求addr和offset都为0
+  if(!fd->writable && (prot & PROT_WRITE) && flags == MAP_SHARED) return failed; //权限检查，文件不可写，但映射过去要求写,且要求写回
+
+
+  struct proc *p = myproc();
+  //之后寻找一个空闲的vma
+  int index = -1;  //空闲vma数组id
+  uint64 sta_addr = sta_addr = get_mmap_space(length, p->mmap_vmas, &index);//映射的虚拟首地址
+  if(sta_addr < 0 || index == -1) return failed;         //函数出现问题 
+  if(sta_addr < p->sz) return failed;                    //堆区空间和mmap空间冲突，地址不够用喽
+
+  //修改信息
+  p->mmap_vmas[index].used = 1;
+  p->mmap_vmas[index].addr = sta_addr;
+  p->mmap_vmas[index].length = length;
+  p->mmap_vmas[index].flags = flags;
+  p->mmap_vmas[index].prot = prot;
+  p->mmap_vmas[index].fd = fd;
+
+  filedup(fd);   //最后别忘了增加file的引用次数。
+
+  return sta_addr;
+}
+
+//取消映射
+uint64 sys_munmap(void)
+{
+  //接受参数
+  uint64 addr;     //起始首地址
+  uint64 length;   //长度
+  if(argaddr(0, &addr) < 0)   return -1;
+  if(argaddr(1, &length) < 0) return -1;
+
+  //调用munmap
+  return munmap(addr, length);
 }

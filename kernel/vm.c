@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -431,4 +436,72 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+//把带脏位的页帧写回文件，并且取消映射.
+//三个参数分别代表起始地址，长度和在vma中的索引
+//这里假设addr和length都是PGSIZE的倍数，方便处理
+uint64 mmap_writeback(uint64 addr, uint64 length,int index)
+{
+  struct proc *p = myproc();
+  uint64 a;
+  for(a = addr; a < addr + length; a += PGSIZE)   //枚举每一页
+  {
+    pte_t *pte = walk(p->pagetable, a, 0);
+    if(!pte || !((*pte) & PTE_V))   //两种情况，指针没有或者内容没有
+      continue;
+    //如果需要写回
+    if((p->mmap_vmas[index].flags & MAP_SHARED) && (*pte) & PTE_D)
+    {
+      uint64 offset = a - p->mmap_vmas[index].addr; //计算偏差
+      //这里设计文件系统，事务，上锁等
+      begin_op();
+      ilock(p->mmap_vmas[index].fd->ip);
+      writei(p->mmap_vmas[index].fd->ip, 1, a, offset, PGSIZE);  //这里和映射的问题相同，可能写不回那么多数据，映射区>文件大小时
+      iunlock(p->mmap_vmas[index].fd->ip);
+      end_op();
+    }
+
+    //将该物理页释放
+    uint64 pa = PTE2PA(*pte);
+    kfree((uint64*)pa);
+  
+    //取消映射
+    *pte = 0;
+  }
+  return 0;
+}
+
+int munmap(uint64 addr, uint64 length)
+{
+  //判断操作是否合法
+  struct proc *p = myproc();
+  int index = get_mmap_index(p, addr);
+  if(index == -1 || addr < p->mmap_vmas[index].addr || 
+    addr + length > p->mmap_vmas[index].addr + p->mmap_vmas[index].length)
+    {
+      printf("addr length exceed!");
+      return -1;
+    }  
+
+  //将addr开始长度为len的写回并取消映射,这里用一个函数表示了
+  if(mmap_writeback(addr, length, index) < 0)
+  {
+    printf("sys_munmap failed!!\n");
+    return -1;
+  }
+    
+  //修改vma块的信息
+  if(p->mmap_vmas[index].addr == addr) //起点相等
+  {
+    p->mmap_vmas[index].addr = addr + length;
+  }
+  p->mmap_vmas[index].length -= length;
+  if(p->mmap_vmas[index].length <= 0)  //释放完了
+  {
+    p->mmap_vmas[index].used = 0; //不使用了
+    fileclose(p->mmap_vmas[index].fd); //文件引用减少
+  }
+
+  return 1;
 }

@@ -289,6 +289,22 @@ fork(void)
   }
   np->sz = p->sz;
 
+  //遍历父进程的所有vma区域，有就拿过来
+  for(i = 0; i < VMA_SZ; i++)
+  {
+    if(p->mmap_vmas[i].used)    //这里所有信息都拿过来
+    {
+      np->mmap_vmas[i].used = p->mmap_vmas[i].used;
+      np->mmap_vmas[i].addr = p->mmap_vmas[i].addr;
+      np->mmap_vmas[i].length = p->mmap_vmas[i].length;
+      np->mmap_vmas[i].prot = p->mmap_vmas[i].prot;
+      np->mmap_vmas[i].flags = p->mmap_vmas[i].flags;
+      np->mmap_vmas[i].fd = p->mmap_vmas[i].fd;
+
+      filedup(np->mmap_vmas[i].fd);  //同时子进程也引用了该文件，增加引用次数。
+    }
+  }
+
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -343,6 +359,19 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+  
+  //这里枚举当前进程的所有vma块，取消映射，
+  //注意，这里放到释放文件之前，因为写回需要用到文件
+  int i;
+  for(i = 0; i < VMA_SZ; i++)
+  {
+    if(p->mmap_vmas[i].used)
+    {
+      munmap(p->mmap_vmas[i].addr, p->mmap_vmas[i].length);
+    }
+  }
+    
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){

@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -29,6 +33,67 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+//返回该地址属于哪个vma，没有返回-1
+int get_mmap_index(struct proc *p, uint64 addr)
+{
+  int i;
+  for(i = 0; i < VMA_SZ; i++)   //遍历所有的vma，查看是否在其中
+  {
+    if(addr >= p->mmap_vmas[i].addr && addr < p->mmap_vmas[i].addr + p->mmap_vmas[i].length)
+      return i;
+  }
+  return -1;
+}
+
+int mmap_fault_handler(struct proc *p, uint64 addr)
+{
+  //首先判断权限对不对
+  int index = get_mmap_index(p, addr);               
+  if((r_scause() == 13 && !(p->mmap_vmas[index].prot & PROT_READ)) ||
+      (r_scause() == 15 && !(p->mmap_vmas[index].prot & PROT_WRITE))) {
+    printf("mmap port filed\n");
+    return -1;
+  }
+
+  //接着分配一个实际的物理页
+  uint64 *pa = kalloc(); 
+  if(!pa)
+  {
+    printf("kalloc failed!\n");
+    return -1;
+  }  
+  memset(pa, 0, PGSIZE);     //物理页清空
+
+  //接下来将文件中的内容搬到此物理页
+  addr = PGROUNDDOWN(addr);  //虚拟地址找到页首地址
+  uint64 offset = addr - p->mmap_vmas[index].addr; //距离文件的偏移
+  ilock(p->mmap_vmas[index].fd->ip);  //要读取文件中的内容，首先要获取该inode节点的锁
+  //这点注意，因为可能映射的空间大于文件大小，所以可能读取内容不足一页设置可能不读取（当offset>=文件大小时）
+  if(readi(p->mmap_vmas[index].fd->ip, 0, (uint64)pa, offset, PGSIZE) < 0)
+  {
+    iunlock(p->mmap_vmas[index].fd->ip);
+    printf("readi from file filed!\n");
+    return -1;
+  } 
+  iunlock(p->mmap_vmas[index].fd->ip);       //这里inode节点使用完毕需要释放锁
+
+  //最后将虚拟地址和物理地址在页表中映射
+  //PTE的权限
+  int perm = PTE_U | PTE_V;
+  if(p->mmap_vmas[index].prot | PROT_READ) perm |= PTE_R;
+  if(p->mmap_vmas[index].prot | PROT_WRITE) perm |= PTE_W;
+  if(p->mmap_vmas[index].prot | PROT_EXEC) perm |= PTE_X;
+  //将虚拟地址和物理地址进行关联
+  if(mappages(p->pagetable, addr, PGSIZE, (uint64)pa, perm) < 0)
+  {
+    printf("mappages filed\n");
+    kfree(pa);
+    return -1;
+  }
+
+  return 0;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -37,6 +102,7 @@ void
 usertrap(void)
 {
   int which_dev = 0;
+  int bad = 0;
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
@@ -67,7 +133,18 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } //这里识别是读取和写页错误，并且是mmap区域的页错误
+  else if((r_scause() == 13 || r_scause() == 15) && get_mmap_index(p, r_stval()) != -1)
+  {
+    // printf("mmaptest!!!!!!!");
+    if(mmap_fault_handler(p, r_stval()) < 0) 
+      bad = 1;
+  }
+  else {
+    bad = 1;
+  }
+
+  if(bad == 1) {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
