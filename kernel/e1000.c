@@ -9,11 +9,11 @@
 #include "net.h"
 
 #define TX_RING_SIZE 16
-static struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));
+static struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));  //发送缓冲区
 static struct mbuf *tx_mbufs[TX_RING_SIZE];
 
-#define RX_RING_SIZE 16
-static struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));
+#define RX_RING_SIZE 16   //缓冲区环的大小
+static struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));  //接受缓冲区
 static struct mbuf *rx_mbufs[RX_RING_SIZE];
 
 // remember where the e1000's registers live.
@@ -95,26 +95,69 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
+  //防止多个cpu抢用，先获取锁
+  acquire(&e1000_lock); 
+
+  //拿到尾指针，判断当前环是否合法
+  uint32 Tail= regs[E1000_TDT];
+  struct tx_desc *desc = &tx_ring[Tail];
+  if(!(desc->status & E1000_TXD_STAT_DD))   //尾指针指向的是第一个空闲的，但这里还未处理，说明之前有错误。
+  {
+    printf("e1000Transmit failed! txring Tail is not DD\n");
+    release(&e1000_lock);
+    return -1;
+  }
+
+  //接下来来了一个新的数据包的buf，这里先判断tail这里是否还有数据包没释放
+  if(tx_mbufs[Tail]) //如果有数据包的话，先释放
+  {
+    mbuffree(tx_mbufs[Tail]); 
+    tx_mbufs[Tail] = 0; 
+  }
   
+  //该描述符挂载的mbuf为空，填充该描述符信息
+  desc->addr = (uint64)m->head;  //这里addr指向m中数据开始的地方，也就是head
+  desc->length = m->len; //数据长度
+  desc->status = 0;      //初始化status
+  desc->cmd |= E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS; //设置这两个标志位，一个是包结束的标志，一个是报告状态->当发送完毕后，硬件自动设置DD位
+  tx_mbufs[Tail] = m;    //数据包挂载
+
+  //修改尾指针
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+  //最后释放整个锁
+  release(&e1000_lock);
+  //添加成功，返回0
   return 0;
 }
 
 static void
 e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
+  //这里不应该加锁
+  // acquire(&e1000_lock); 
+  //设备的接受程序应该是一个循环，将E1000写入内存的所有数据全部取出交给网络栈分析
+  while(1)
+  {
+    
+    //根据提示，获取尾指针
+    uint32 Tail = (regs[E1000_RDT] + 1) % RX_RING_SIZE;   //注意这里取的是尾指针下一个
+    struct rx_desc *desc = &rx_ring[Tail];
+    //如果当前描述符对应的数据没有接收完毕，这里DD的含义都是硬件是否处理完成
+    //所以这里DD的含义就是当前数据是否已经接收完毕了
+    if(!(desc->status & E1000_RXD_STAT_DD))  break; 
+    //这里数据包里有数据，但长度还未设置，但描述符长度是有的
+    rx_mbufs[Tail]->len = desc->length;
+    net_rx(rx_mbufs[Tail]);    //将数据包送到网络层
+    rx_mbufs[Tail] = mbufalloc(0);  //给当前数据缓冲区分配一个新的空数据包
+    if (!rx_mbufs[Tail])            //分配空间不足，报错
+      panic("e1000 e1000_recv mbufalloc failed!");
+      
+    desc->addr = (uint64) rx_mbufs[Tail]->head;     //将描述符存放数据地址指向新的数据包的存放数据地方
+    desc->status = 0;                               //该描述符数据已经拿走，清空状态
+    regs[E1000_RDT] = (regs[E1000_RDT] + 1) % RX_RING_SIZE; //尾指针向后走
+  }
+  
+  // release(&e1000_lock); 这里同理
 }
 
 void

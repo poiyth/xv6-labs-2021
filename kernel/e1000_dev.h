@@ -93,33 +93,33 @@
 #define E1000_TXD_CMD_EOP    0x01 /* End of Packet */
 #define E1000_TXD_CMD_RS     0x08 /* Report Status */
 
-/* Transmit Descriptor status definitions [E1000 3.3.3.2] */
+/* Transmit Descriptor status definitions [E1000 3.3.3.2] 定义该描述符已经处理完成*/
 #define E1000_TXD_STAT_DD    0x00000001 /* Descriptor Done */
 
-// [E1000 3.3.3]
+// [E1000 3.3.3]  发送描述符
 struct tx_desc
 {
-  uint64 addr;
-  uint16 length;
-  uint8 cso;
-  uint8 cmd;
-  uint8 status;
-  uint8 css;
-  uint16 special;
+  uint64 addr;        //数据缓冲区的物理地址
+  uint16 length;      //数据长度
+  uint8 cso;          //校验和偏移，用于TCP/UDP校验和计算
+  uint8 cmd;          //命令字段
+  uint8 status;       //状态字段
+  uint8 css;          //校验和起始
+  uint16 special;     //特殊字段，保留或作特殊用途
 };
 
 /* Receive Descriptor bit definitions [E1000 3.2.3.1] */
 #define E1000_RXD_STAT_DD       0x01    /* Descriptor Done */
 #define E1000_RXD_STAT_EOP      0x02    /* End of Packet */
 
-// [E1000 3.2.3]
+// [E1000 3.2.3]  接受描述符
 struct rx_desc
 {
-  uint64 addr;       /* Address of the descriptor's data buffer */
+  uint64 addr;       /* Address of the descriptor's data buffer 数据缓冲区的物理地址*/
   uint16 length;     /* Length of data DMAed into data buffer */
-  uint16 csum;       /* Packet checksum */
-  uint8 status;      /* Descriptor status */
-  uint8 errors;      /* Descriptor Errors */
+  uint16 csum;       /* Packet checksum 校验和*/ 
+  uint8 status;      /* Descriptor status 状态*/
+  uint8 errors;      /* Descriptor Errors 错误信息*/
   uint16 special;
 };
 

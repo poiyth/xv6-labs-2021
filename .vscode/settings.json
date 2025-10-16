@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "exception": "c",
+        "memory_resource": "c",
+        "fstream": "c",
+        "iosfwd": "c",
+        "new": "c",
+        "ostream": "c",
+        "sstream": "c",
+        "streambuf": "c",
+        "proc.h": "c"
+    }
+}

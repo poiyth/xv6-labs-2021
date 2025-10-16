@@ -86,7 +86,7 @@ uartinit(void)
 void
 uartputc(int c)
 {
-  acquire(&uart_tx_lock);
+  acquire(&uart_tx_lock);   //先获取锁
 
   if(panicked){
     for(;;)
@@ -94,16 +94,16 @@ uartputc(int c)
   }
 
   while(1){
-    if(uart_tx_w == uart_tx_r + UART_TX_BUF_SIZE){
+    if(uart_tx_w == uart_tx_r + UART_TX_BUF_SIZE){    //缓冲区已满，uart_tx_w，uart_tx_r为读写指针
       // buffer is full.
       // wait for uartstart() to open up space in the buffer.
-      sleep(&uart_tx_r, &uart_tx_lock);
-    } else {
-      uart_tx_buf[uart_tx_w % UART_TX_BUF_SIZE] = c;
-      uart_tx_w += 1;
-      uartstart();
-      release(&uart_tx_lock);
-      return;
+      sleep(&uart_tx_r, &uart_tx_lock);                //缓冲区满则当前进程休眠
+    } else {                                           //否则进行传输
+      uart_tx_buf[uart_tx_w % UART_TX_BUF_SIZE] = c;   //放入缓冲区
+      uart_tx_w += 1;                                  //写指针往后移
+      uartstart();                                     //进行传输
+      release(&uart_tx_lock);                          //释放锁
+      return;                                          //进程返回
     }
   }
 }
@@ -154,9 +154,9 @@ uartstart()
     uart_tx_r += 1;
     
     // maybe uartputc() is waiting for space in the buffer.
-    wakeup(&uart_tx_r);
+    wakeup(&uart_tx_r);  //唤醒
     
-    WriteReg(THR, c);
+    WriteReg(THR, c);    //往设备寄存器中写入，执行完该指令设备才能彻底不依靠CPU自己实现传输，由设备自动完成。
   }
 }
 
